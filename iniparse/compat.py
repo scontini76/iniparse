@@ -1,5 +1,5 @@
 # Copyright (c) 2001, 2002, 2003 Python Software Foundation
-# Copyright (c) 2004 Paramjit Oberoi <param.cs.wisc.edu>
+# Copyright (c) 2004-2008 Paramjit Oberoi <param.cs.wisc.edu>
 # All Rights Reserved.  See LICENSE-PSF & LICENSE for details.
 
 """Compatibility interfaces for ConfigParser
@@ -18,7 +18,7 @@ from ConfigParser import DuplicateSectionError,    \
                   InterpolationDepthError,         \
                   InterpolationSyntaxError,        \
                   DEFAULTSECT, MAX_INTERPOLATION_DEPTH
-                  
+
 # These are imported only for compatiability.
 # The code below does not reference them directly.
 from ConfigParser import Error, InterpolationError, \
@@ -27,9 +27,11 @@ from ConfigParser import Error, InterpolationError, \
 import ini
 
 class RawConfigParser(object):
-    def __init__(self, defaults=None):
+    def __init__(self, defaults=None, dict_type=dict):
+        if dict_type != dict:
+            raise ValueError('Custom dict types not supported')
         self.data = ini.INIConfig(defaults=defaults, optionxformsource=self)
-        
+
     def optionxform(self, optionstr):
         return optionstr.lower()
 
@@ -47,12 +49,18 @@ class RawConfigParser(object):
         """Create a new section in the configuration.
 
         Raise DuplicateSectionError if a section by the specified name
-        already exists.
+        already exists.  Raise ValueError if name is DEFAULT or any of
+        its case-insensitive variants.
         """
+        # The default section is the only one that gets the case-insensitive
+        # treatment - so it is special-cased here.
+        if section.lower() == "default":
+            raise ValueError, 'Invalid section name: %s' % section
+
         if self.has_section(section):
             raise DuplicateSectionError(section)
         else:
-            self.data.new_namespace(section)
+            self.data._new_namespace(section)
 
     def has_section(self, section):
         """Indicate whether the named section is present in the configuration.
@@ -91,7 +99,7 @@ class RawConfigParser(object):
             except IOError:
                 continue
             files_read.append(filename)
-            self.data.readfp(fp)
+            self.data._readfp(fp)
             fp.close()
         return files_read
 
@@ -103,7 +111,7 @@ class RawConfigParser(object):
         taken from fp.name.  If fp has no `name' attribute, `<???>' is
         used.
         """
-        self.data.readfp(fp)
+        self.data._readfp(fp)
 
     def get(self, section, option, vars=None):
         if not self.has_section(section):
@@ -185,7 +193,7 @@ class RawConfigParser(object):
 
 class ConfigDict(object):
     """Present a dict interface to a ini section."""
-    
+
     def __init__(self, cfg, section, vars):
         self.cfg = cfg
         self.section = section
@@ -234,7 +242,7 @@ class ConfigParser(RawConfigParser):
                     value = value % vars
                 except KeyError, e:
                     raise InterpolationMissingOptionError(
-                        option, section, rawval, e[0])
+                        option, section, rawval, e.args[0])
             else:
                 break
         if value.find("%(") != -1:
@@ -277,9 +285,21 @@ class ConfigParser(RawConfigParser):
 
 
 class SafeConfigParser(ConfigParser):
+    _interpvar_re = re.compile(r"%\(([^)]+)\)s")
+    _badpercent_re = re.compile(r"%[^%]|%$")
+
     def set(self, section, option, value):
         if not isinstance(value, basestring):
             raise TypeError("option values must be strings")
+        # check for bad percent signs:
+        # first, replace all "good" interpolations
+        tmp_value = self._interpvar_re.sub('', value)
+        # then, check if there's a lone percent sign left
+        m = self._badpercent_re.search(tmp_value)
+        if m:
+            raise ValueError("invalid interpolation syntax in %r at "
+                             "position %d" % (value, m.start()))
+
         ConfigParser.set(self, section, option, value)
 
     def _interpolate(self, section, option, rawval, vars):
@@ -326,4 +346,4 @@ class SafeConfigParser(ConfigParser):
             else:
                 raise InterpolationSyntaxError(
                     option, section,
-                    "'%' must be followed by '%' or '(', found: " + `rest`)
+                    "'%' must be followed by '%' or '(', found: " + repr(rest))

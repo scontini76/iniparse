@@ -2,7 +2,7 @@
 
 from distutils.core import setup
 
-VERSION = '0.2.3'
+VERSION = '0.2.4'
 
 setup(name ='iniparse',
       version = VERSION,
@@ -24,6 +24,9 @@ use.''',
         'License :: OSI Approved :: Python Software Foundation License',
         'Operating System :: OS Independent',
         'Programming Language :: Python',
+        'Programming Language :: Python :: 2.4',
+        'Programming Language :: Python :: 2.5',
+        'Programming Language :: Python :: 2.6',
         'Topic :: Software Development :: Libraries :: Python Modules',
       ],
       packages = ['iniparse'],

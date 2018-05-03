@@ -1,7 +1,3 @@
-# Copyright (c) 2001, 2002, 2003 Python Software Foundation
-# Copyright (c) 2004 Paramjit Oberoi <param.cs.wisc.edu>
-# All Rights Reserved.  See LICENSE-PSF & LICENSE for details.
-
 """Access and/or modify INI files
 
 * Compatiable with ConfigParser
@@ -42,9 +38,9 @@ Example:
 # Backward-compatiable with ConfigParser
 
 import re
-import config
-from sets import Set
 from ConfigParser import DEFAULTSECT, ParsingError, MissingSectionHeaderError
+
+import config
 
 class LineType(object):
     line = None
@@ -238,12 +234,12 @@ class LineContainer(object):
         elif len(self.contents) == 1:
             return self.contents[0].value
         else:
-            return '\n'.join([str(x.value) for x in self.contents
+            return '\n'.join([('%s' % x.value) for x in self.contents
                               if not isinstance(x, (CommentLine, EmptyLine))])
 
     def set_value(self, data):
         self.orgvalue = data
-        lines = str(data).split('\n')
+        lines = ('%s' % data).split('\n')
         linediff = len(lines) - len(self.contents)
         if linediff > 0:
             for _ in range(linediff):
@@ -257,7 +253,7 @@ class LineContainer(object):
     value = property(get_value, set_value)
 
     def __str__(self):
-        s = [str(x) for x in self.contents]
+        s = [x.__str__() for x in self.contents]
         return '\n'.join(s)
 
     def finditer(self, key):
@@ -349,7 +345,7 @@ class INISection(config.ConfigNamespace):
         del self._options[key]
 
     def __iter__(self):
-        d = Set()
+        d = set()
         for l in self._lines:
             for x in l.contents:
                 if isinstance(x, LineContainer):
@@ -366,7 +362,7 @@ class INISection(config.ConfigNamespace):
                     yield x
                     d.add(x)
 
-    def new_namespace(self, name):
+    def _new_namespace(self, name):
         raise Exception('No sub-sections allowed', name)
 
 
@@ -394,6 +390,10 @@ def readline_iterator(f):
         yield line
 
 
+def lower(x):
+    return x.lower()
+
+
 class INIConfig(config.ConfigNamespace):
     _data = None
     _sections = None
@@ -403,8 +403,9 @@ class INIConfig(config.ConfigNamespace):
     _sectionxformvalue = None
     _sectionxformsource = None
     _parse_exc = None
-    def __init__(self, fp=None, defaults = None, parse_exc=True,
-                 optionxformvalue=str.lower, optionxformsource=None,
+    _bom = False
+    def __init__(self, fp=None, defaults=None, parse_exc=True,
+                 optionxformvalue=lower, optionxformsource=None,
                  sectionxformvalue=None, sectionxformsource=None):
         self._data = LineContainer()
         self._parse_exc = parse_exc
@@ -418,7 +419,7 @@ class INIConfig(config.ConfigNamespace):
         for name, value in defaults.iteritems():
             self._defaults[name] = value
         if fp is not None:
-            self.readfp(fp)
+            self._readfp(fp)
 
     _optionxform = _make_xform_property('_optionxform', 'optionxform')
     _sectionxform = _make_xform_property('_sectionxform', 'optionxform')
@@ -439,14 +440,14 @@ class INIConfig(config.ConfigNamespace):
         del self._sections[key]
 
     def __iter__(self):
-        d = Set()
+        d = set()
         for x in self._data.contents:
             if isinstance(x, LineContainer):
                 if x.name not in d:
                     yield x.name
                     d.add(x.name)
 
-    def new_namespace(self, name):
+    def _new_namespace(self, name):
         if self._data.contents:
             self._data.add(EmptyLine())
         obj = LineContainer(SectionLine(name))
@@ -462,7 +463,13 @@ class INIConfig(config.ConfigNamespace):
         return ns
 
     def __str__(self):
-        return str(self._data)
+        if self._bom:
+            fmt = u'\ufeff%s'
+        else:
+            fmt = '%s'
+        return fmt % self._data.__str__()
+
+    __unicode__ = __str__
 
     _line_types = [EmptyLine, CommentLine,
                    SectionLine, OptionLine,
@@ -477,7 +484,7 @@ class INIConfig(config.ConfigNamespace):
             # can't parse line
             return None
 
-    def readfp(self, fp):
+    def _readfp(self, fp):
         cur_section = None
         cur_option = None
         cur_section_name = None
@@ -492,6 +499,12 @@ class INIConfig(config.ConfigNamespace):
         line = None
 
         for line in readline_iterator(fp):
+            # Check for BOM on first line
+            if linecount == 0 and isinstance(line, unicode):
+                if line[0] == u'\ufeff':
+                    line = line[1:]
+                    self._bom = True
+
             lineobj = self._parse(line)
             linecount += 1
 
@@ -550,7 +563,7 @@ class INIConfig(config.ConfigNamespace):
                         cur_section_name = self._sectionxform(cur_section.name)
                     else:
                         cur_section_name = cur_section.name
-                    if not self._sections.has_key(cur_section_name):
+                    if cur_section_name not in self._sections:
                         self._sections[cur_section_name] = \
                                 INISection(cur_section, defaults=self._defaults,
                                            optionxformsource=self)
