@@ -1,3 +1,14 @@
+2010-04-17
+* released 0.3.2
+
+2010-02-26
+* added tidy() and change_comment_syntax() based on patch
+  by Paul Lambert.
+* added ConfigParser exceptions and constants to the iniparse module
+
+2009-03-23
+* Added debian package support contributed by Gavin Kinsey
+
 2009-03-02
 * released 0.3.1
 
