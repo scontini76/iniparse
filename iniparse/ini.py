@@ -183,6 +183,8 @@ class EmptyLine(LineType):
     def to_string(self):
         return ''
 
+    value = property(lambda _: '')
+
     def parse(cls, line):
         if line.strip(): return None
         return cls(line)
@@ -192,9 +194,11 @@ class EmptyLine(LineType):
 class ContinuationLine(LineType):
     regex = re.compile(r'^\s+(?P<value>.*)$')
 
-    def __init__(self, value, value_offset=8, line=None):
+    def __init__(self, value, value_offset=None, line=None):
         super(ContinuationLine, self).__init__(line)
         self.value = value
+        if value_offset is None:
+            value_offset = 8
         self.value_offset = value_offset
 
     def to_string(self):
@@ -235,19 +239,28 @@ class LineContainer(object):
             return self.contents[0].value
         else:
             return '\n'.join([('%s' % x.value) for x in self.contents
-                              if not isinstance(x, (CommentLine, EmptyLine))])
+                              if not isinstance(x, CommentLine)])
 
     def set_value(self, data):
         self.orgvalue = data
         lines = ('%s' % data).split('\n')
-        linediff = len(lines) - len(self.contents)
-        if linediff > 0:
-            for _ in range(linediff):
-                self.add(ContinuationLine(''))
-        elif linediff < 0:
-            self.contents = self.contents[:linediff]
-        for i,v in enumerate(lines):
-            self.contents[i].value = v
+
+        # If there is an existing ContinuationLine, use its offset
+        value_offset = None
+        for v in self.contents:
+            if isinstance(v, ContinuationLine):
+                value_offset = v.value_offset
+                break
+
+        # Rebuild contents list, preserving initial OptionLine
+        self.contents = self.contents[0:1]
+        self.contents[0].value = lines[0]
+        del lines[0]
+        for line in lines:
+            if line.strip():
+                self.add(ContinuationLine(line, value_offset))
+            else:
+                self.add(EmptyLine())
 
     name = property(get_name, set_name)
     value = property(get_value, set_value)
@@ -296,6 +309,7 @@ class INISection(config.ConfigNamespace):
     _defaults = None
     _optionxformvalue = None
     _optionxformsource = None
+    _compat_skip_empty_lines = set()
     def __init__(self, lineobj, defaults = None,
                        optionxformvalue=None, optionxformsource=None):
         self._lines = [lineobj]
@@ -305,6 +319,25 @@ class INISection(config.ConfigNamespace):
         self._options = {}
 
     _optionxform = _make_xform_property('_optionxform')
+
+    def _compat_get(self, key):
+        # identical to __getitem__ except that _compat_XXX
+        # is checked for backward-compatible handling
+        if key == '__name__':
+            return self._lines[-1].name
+        if self._optionxform: key = self._optionxform(key)
+        try:
+            value = self._options[key].value
+            del_empty = key in self._compat_skip_empty_lines
+        except KeyError:
+            if self._defaults and key in self._defaults._options:
+                value = self._defaults._options[key].value
+                del_empty = key in self._defaults._compat_skip_empty_lines
+            else:
+                raise
+        if del_empty:
+            value = re.sub('\n+', '\n', value)
+        return value
 
     def __getitem__(self, key):
         if key == '__name__':
@@ -321,6 +354,8 @@ class INISection(config.ConfigNamespace):
     def __setitem__(self, key, value):
         if self._optionxform: xkey = self._optionxform(key)
         else: xkey = key
+        if xkey in self._compat_skip_empty_lines:
+            self._compat_skip_empty_lines.remove(xkey)
         if xkey not in self._options:
             # create a dummy object - value may have multiple lines
             obj = LineContainer(OptionLine(key, ''))
@@ -332,6 +367,8 @@ class INISection(config.ConfigNamespace):
 
     def __delitem__(self, key):
         if self._optionxform: key = self._optionxform(key)
+        if key in self._compat_skip_empty_lines:
+            self._compat_skip_empty_lines.remove(key)
         for l in self._lines:
             remaining = []
             for o in l.contents:
@@ -441,6 +478,7 @@ class INIConfig(config.ConfigNamespace):
 
     def __iter__(self):
         d = set()
+        d.add(DEFAULTSECT)
         for x in self._data.contents:
             if isinstance(x, LineContainer):
                 if x.name not in d:
@@ -490,6 +528,7 @@ class INIConfig(config.ConfigNamespace):
         cur_section_name = None
         cur_option_name = None
         pending_lines = []
+        pending_empty_lines = False
         try:
             fname = fp.name
         except AttributeError:
@@ -523,8 +562,12 @@ class INIConfig(config.ConfigNamespace):
 
             if isinstance(lineobj, ContinuationLine):
                 if cur_option:
-                    cur_option.extend(pending_lines)
-                    pending_lines = []
+                    if pending_lines:
+                        cur_option.extend(pending_lines)
+                        pending_lines = []
+                        if pending_empty_lines:
+                            optobj._compat_skip_empty_lines.add(cur_option_name)
+                            pending_empty_lines = False
                     cur_option.add(lineobj)
                 else:
                     # illegal continuation line - convert to comment
@@ -534,8 +577,12 @@ class INIConfig(config.ConfigNamespace):
                     lineobj = make_comment(line)
 
             if isinstance(lineobj, OptionLine):
-                cur_section.extend(pending_lines)
-                pending_lines = []
+                if pending_lines:
+                    cur_option.extend(pending_lines)
+                    pending_lines = []
+                    if pending_empty_lines:
+                        optobj._compat_skip_empty_lines.add(cur_option_name)
+                        pending_empty_lines = False
                 cur_option = LineContainer(lineobj)
                 cur_section.add(cur_option)
                 if self._optionxform:
@@ -551,6 +598,7 @@ class INIConfig(config.ConfigNamespace):
             if isinstance(lineobj, SectionLine):
                 self._data.extend(pending_lines)
                 pending_lines = []
+                pending_empty_lines = False
                 cur_section = LineContainer(lineobj)
                 self._data.add(cur_section)
                 cur_option = None
@@ -572,6 +620,8 @@ class INIConfig(config.ConfigNamespace):
 
             if isinstance(lineobj, (CommentLine, EmptyLine)):
                 pending_lines.append(lineobj)
+                if isinstance(lineobj, EmptyLine):
+                    pending_empty_lines = True
 
         self._data.extend(pending_lines)
         if line and line[-1]=='\n':

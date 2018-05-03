@@ -1,3 +1,21 @@
+2009-02-27
+* released 0.3.0
+
+2009-02-22
+* Make INIConfig objects pickle-able
+* Fix the defaults() method
+* Replicate ConfigParser behavior regarding empty lines in
+  multi-line values - empty lines are stripped on parsing,
+  but preserved when the value is explicitly set.
+
+2009-02-10
+* Skip DEFAULT section when listing sections (issue 8)
+
+2009-02-03
+* Bugfixes for continuation line behavior, based on patch by
+  sidnei.da.silva - (1) preserve empty lines in multi-line
+  values, and (2) fix assignment to multi-line values
+
 2008-12-06
 * released 0.2.4
 

@@ -1,4 +1,7 @@
 import unittest
+import pickle
+import ConfigParser
+from textwrap import dedent
 from StringIO import StringIO
 from iniparse import compat, ini
 
@@ -101,7 +104,7 @@ opt = 1
     def test_read(self):
         c = ini.INIConfig()
         c._readfp(StringIO(self.s))
-        self.assertEqual(c.sec.opt, '1\n2\n3')
+        self.assertEqual(c.sec.opt, '1\n2\n\n3')
 
     def test_write(self):
         c = ini.INIConfig()
@@ -133,6 +136,268 @@ class test_custom_dict(unittest.TestCase):
     def test_custom_dict_not_supported(self):
         self.assertRaises(ValueError, compat.RawConfigParser, None, 'foo')
 
+class test_compat(unittest.TestCase):
+    """Miscellaneous compatibility tests."""
+
+    s = dedent("""\
+        [DEFAULT]
+        pi = 3.1415
+        three = 3
+        poet = e e
+
+             cummings
+        NH =
+         live free
+
+         or die
+
+        [sec]
+        opt = 6
+        three = 3.0
+        no-three = one
+         two
+
+         four
+        longopt = foo
+         bar
+
+        # empty line should not be part of value
+         baz
+
+         bat
+
+        """)
+
+    def do_test(self, c):
+        # default section is not acknowledged
+        self.assertEqual(c.sections(), ['sec'])
+        # options in the default section are merged with other sections
+        self.assertEqual(sorted(c.options('sec')),
+                         ['longopt', 'nh', 'no-three', 'opt', 'pi', 'poet', 'three'])
+
+        # empty lines are stripped from multi-line values
+        self.assertEqual(c.get('sec', 'poet').split('\n'),
+                         ['e e', 'cummings'])
+        self.assertEqual(c.get('DEFAULT', 'poet').split('\n'),
+                         ['e e', 'cummings'])
+        self.assertEqual(c.get('sec', 'longopt').split('\n'),
+                         ['foo', 'bar', 'baz', 'bat'])
+        self.assertEqual(c.get('sec', 'NH').split('\n'),
+                         ['', 'live free', 'or die'])
+
+        # check that empy-line stripping happens on all access paths
+        # defaults()
+        self.assertEqual(c.defaults(), {
+            'poet': 'e e\ncummings',
+            'nh': '\nlive free\nor die',
+            'pi': '3.1415',
+            'three': '3',
+        })
+        # items()
+        l = c.items('sec')
+        l.sort()
+        self.assertEqual(l, [
+            ('longopt', 'foo\nbar\nbaz\nbat'),
+            ('nh', '\nlive free\nor die'),
+            ('no-three', 'one\ntwo\nfour'),
+            ('opt', '6'),
+            ('pi', '3.1415'),
+            ('poet', 'e e\ncummings'),
+            ('three', '3.0'),
+        ])
+
+        # empty lines are preserved on explicitly set values
+        c.set('sec', 'longopt', '\n'.join(['a', 'b', '', 'c', '', '', 'd']))
+        c.set('DEFAULT', 'NH', '\nlive free\n\nor die')
+        self.assertEqual(c.get('sec', 'longopt').split('\n'),
+                         ['a', 'b', '', 'c', '', '', 'd'])
+        self.assertEqual(c.get('sec', 'NH').split('\n'),
+                         ['', 'live free', '', 'or die'])
+        self.assertEqual(c.defaults(), {
+            'poet': 'e e\ncummings',
+            'nh': '\nlive free\n\nor die',
+            'pi': '3.1415',
+            'three': '3',
+        })
+        # items()
+        l = c.items('sec')
+        l.sort()
+        self.assertEqual(l, [
+            ('longopt', 'a\nb\n\nc\n\n\nd'),
+            ('nh', '\nlive free\n\nor die'),
+            ('no-three', 'one\ntwo\nfour'),
+            ('opt', '6'),
+            ('pi', '3.1415'),
+            ('poet', 'e e\ncummings'),
+            ('three', '3.0'),
+        ])
+
+        # empty line special magic goes away after remove_option()
+        self.assertEqual(c.get('sec', 'no-three').split('\n'),
+                         ['one', 'two','four'])
+        c.remove_option('sec', 'no-three')
+        c.set('sec', 'no-three', 'q\n\nw')
+        self.assertEqual(c.get('sec', 'no-three'), 'q\n\nw')
+        c.remove_option('sec', 'no-three')
+
+    def do_configparser_test(self, cfg_class):
+        c = cfg_class()
+        c.readfp(StringIO(self.s))
+        self.do_test(c)
+        o = StringIO()
+        c.write(o)
+        self.assertEqual(o.getvalue().split('\n'), [
+            '[DEFAULT]',
+            'poet = e e',
+            '\tcummings',
+            'nh = ',
+            '\tlive free',
+            '\t',
+            '\tor die',
+            'pi = 3.1415',
+            'three = 3',
+            '',
+            '[sec]',
+            'opt = 6',
+            'longopt = a',
+            '\tb',
+            '\t',
+            '\tc',
+            '\t',
+            '\t',
+            '\td',
+            'three = 3.0',
+            '',
+            ''])
+
+    def test_py_rawcfg(self):
+        self.do_configparser_test(ConfigParser.RawConfigParser)
+
+    def test_py_cfg(self):
+        self.do_configparser_test(ConfigParser.ConfigParser)
+
+    def test_py_safecfg(self):
+        self.do_configparser_test(ConfigParser.SafeConfigParser)
+
+    def do_compat_test(self, cfg_class):
+        c = cfg_class()
+        c.readfp(StringIO(self.s))
+        self.do_test(c)
+        o = StringIO()
+        c.write(o)
+        self.assertEqual(o.getvalue().split('\n'), [
+            '[DEFAULT]',
+            'pi = 3.1415',
+            'three = 3',
+            'poet = e e',
+            '',
+            '     cummings',
+            'NH =',
+            ' live free',
+            '',
+            ' or die',
+            '',
+            '[sec]',
+            'opt = 6',
+            'three = 3.0',
+            'longopt = a',
+            ' b',
+            '',
+            ' c',
+            '',
+            '',
+            ' d',
+            '',
+            ''])
+
+    def test_py_rawcfg(self):
+        self.do_compat_test(compat.RawConfigParser)
+
+    def test_py_cfg(self):
+        self.do_compat_test(compat.ConfigParser)
+
+    def test_py_safecfg(self):
+        self.do_compat_test(compat.SafeConfigParser)
+
+class test_pickle(unittest.TestCase):
+    s = dedent("""\
+        [DEFAULT]
+        pi = 3.1415
+        three = 3
+        poet = e e
+
+             cummings
+        NH =
+         live free
+
+         or die
+
+        [sec]
+        opt = 6
+        three = 3.0
+        no-three = one
+         two
+
+         four
+
+        james = bond
+        """)
+
+    def do_compat_checks(self, c):
+        self.assertEqual(c.sections(), ['sec'])
+        self.assertEqual(sorted(c.options('sec')),
+                         ['james', 'nh', 'no-three', 'opt', 'pi', 'poet', 'three'])
+        self.assertEqual(c.defaults(), {
+            'poet': 'e e\ncummings',
+            'nh': '\nlive free\nor die',
+            'pi': '3.1415',
+            'three': '3',
+        })
+        l = c.items('sec')
+        l.sort()
+        self.assertEqual(l, [
+            ('james', 'bond'),
+            ('nh', '\nlive free\nor die'),
+            ('no-three', 'one\ntwo\nfour\n'),
+            ('opt', '6'),
+            ('pi', '3.1415'),
+            ('poet', 'e e\ncummings'),
+            ('three', '3.0'),
+        ])
+        self.do_ini_checks(c.data)
+
+    def do_ini_checks(self, c):
+        self.assertEqual(list(c), ['sec'])
+        self.assertEqual(sorted(c['sec']), ['james', 'nh', 'no-three', 'opt', 'pi', 'poet', 'three'])
+        self.assertEqual(c._defaults['pi'], '3.1415')
+        self.assertEqual(c.sec.opt, '6')
+        self.assertEqual(c.sec.three, '3.0')
+        self.assertEqual(c.sec['no-three'], 'one\ntwo\n\nfour\n')
+        self.assertEqual(c.sec.james, 'bond')
+        self.assertEqual(c.sec.pi, '3.1415')
+        self.assertEqual(c.sec.poet, 'e e\n\ncummings')
+        self.assertEqual(c.sec.NH, '\nlive free\n\nor die')
+        self.assertEqual(str(c), self.s)
+
+    def test_compat(self):
+        for cfg_class in (compat.ConfigParser, compat.RawConfigParser, compat.SafeConfigParser):
+            c = cfg_class()
+            c.readfp(StringIO(self.s))
+            self.do_compat_checks(c)
+            p = pickle.dumps(c)
+            c = None
+            c2 = pickle.loads(p)
+            self.do_compat_checks(c2)
+
+    def test_ini(self):
+        c = ini.INIConfig()
+        c._readfp(StringIO(self.s))
+        self.do_ini_checks(c)
+        p = pickle.dumps(c)
+        c = None
+        c2 = pickle.loads(p)
+        self.do_ini_checks(c2)
+
 class suite(unittest.TestSuite):
     def __init__(self):
         unittest.TestSuite.__init__(self, [
@@ -141,4 +406,6 @@ class suite(unittest.TestSuite):
                 unittest.makeSuite(test_multiline_with_comments, 'test'),
                 unittest.makeSuite(test_empty_file, 'test'),
                 unittest.makeSuite(test_custom_dict, 'test'),
+                unittest.makeSuite(test_compat, 'test'),
+                unittest.makeSuite(test_pickle, 'test'),
     ])
