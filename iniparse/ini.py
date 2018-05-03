@@ -404,7 +404,7 @@ class INISection(config.ConfigNamespace):
 
 
 def make_comment(line):
-    return CommentLine(line.rstrip())
+    return CommentLine(line.rstrip('\n'))
 
 
 def readline_iterator(f):
@@ -578,11 +578,9 @@ class INIConfig(config.ConfigNamespace):
 
             if isinstance(lineobj, OptionLine):
                 if pending_lines:
-                    cur_option.extend(pending_lines)
+                    cur_section.extend(pending_lines)
                     pending_lines = []
-                    if pending_empty_lines:
-                        optobj._compat_skip_empty_lines.add(cur_option_name)
-                        pending_empty_lines = False
+                    pending_empty_lines = False
                 cur_option = LineContainer(lineobj)
                 cur_section.add(cur_option)
                 if self._optionxform:
