@@ -1,13 +1,13 @@
 %{!?python_sitelib: %define python_sitelib %(%{__python} -c "from distutils.sysconfig import get_python_lib; print get_python_lib()")}
 
-Name:           iniparse
-Version:        0.2
+Name:           python-iniparse
+Version:        0.2.1
 Release:        1%{?dist}
 Summary:        Python Module for Accessing and Modifying Configuration Data in INI files
 Group:          Development/Libraries
 License:        MIT
 URL:            http://code.google.com/p/iniparse/
-Source0:        http://iniparse.googlecode.com/files/%{name}-%{version}.tar.gz
+Source0:        http://iniparse.googlecode.com/files/iniparse-%{version}.tar.gz
 BuildRoot:      %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 
 BuildRequires: python-setuptools
@@ -22,7 +22,7 @@ lines are preserved when data is updated), and is more convenient to
 use.
 
 %prep
-%setup -q
+%setup -q -n iniparse-%{version}
 
 
 %build
@@ -31,7 +31,9 @@ use.
 %install
 rm -rf $RPM_BUILD_ROOT
 %{__python} setup.py install -O1 --skip-build --root $RPM_BUILD_ROOT
-
+# fixes
+chmod 644 $RPM_BUILD_ROOT//usr/share/doc/iniparse-%{version}/index.html
+mv $RPM_BUILD_ROOT/usr/share/doc/iniparse-%{version} $RPM_BUILD_ROOT/usr/share/doc/python-iniparse-%{version}
 
 %clean
 rm -rf $RPM_BUILD_ROOT
@@ -39,12 +41,18 @@ rm -rf $RPM_BUILD_ROOT
 
 %files
 %defattr(-,root,root,-)
-%doc README LICENSE-PSF LICENSE Changelog html/*
-%{python_sitelib}/%{name}
+%doc  %{_docdir}/python-iniparse-%{version}/*
+%{python_sitelib}/iniparse
 
 
 
 %changelog
+* Tue Aug 7 2007 Paramjit Oberoi <param@cs.wisc.edu> - 0.2.1-1
+- Release 0.2.1
+* Fri Jul 27 2007 Tim Lauridsen <timlau@fedoraproject.org> - 0.2-3
+- relocated doc to %{_docdir}/python-iniparse-%{version}
+* Thu Jul 26 2007 Tim Lauridsen <timlau@fedoraproject.org> - 0.2-2
+- changed name from iniparse to python-iniparse
 * Tue Jul 17 2007 Tim Lauridsen <timlau@fedoraproject.org> - 0.2-1
 - Release 0.2
 - Added html/* to %%doc
